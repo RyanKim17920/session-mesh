@@ -38,7 +38,8 @@ def check(cond, msg):
 
 def main():
     tmp = tempfile.mkdtemp(prefix="mesh-sim-")
-    base = dict(os.environ, CLAUDE_MESH_DIR=tmp)
+    base = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE_CODE_MESSAGING")}
+    base.update(CLAUDE_MESH_DIR=tmp, CLAUDE_MESH_NO_SSH_CONFIG="1", CLAUDE_MESH_RELAY="0", CLAUDE_MESH_PULL="0")
     a = dict(base, CLAUDE_MESH_CLAUDE_PID=str(os.getpid()))        # pid override stands in for "claude" ancestor
     b = dict(base, CLAUDE_MESH_CLAUDE_PID=str(os.getppid()))
     sa, sb = "aaaa1111-session-a", "bbbb2222-session-b"

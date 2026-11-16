@@ -19,10 +19,12 @@ TOOLS = [
     ("mesh_whoami", "Show this session's session-mesh id, name, host and how identity was resolved.", schema({})),
     ("mesh_set_name", "Rename this session on the mesh (letters, digits, . _ -; max 40 chars).",
      schema({"name": {"type": "string"}}, ["name"])),
-    ("mesh_list_peers", "List other Claude Code sessions on this machine/filesystem and on SSH hosts in ~/.claude-mesh/hosts.",
+    ("mesh_list_peers", "List other Claude Code sessions on this machine/filesystem and on SSH hosts in ~/.claude-mesh/hosts, and across a reverse-forwarded relay socket (each peer shows its `via`).",
      schema({"include_stale": {"type": "boolean", "default": False}})),
     ("mesh_send", "Send a short message (max 4 KB) to another session by name or session-id prefix.",
-     schema({"to": {"type": "string"}, "message": {"type": "string"}}, ["to", "message"])),
+     schema({"to": {"type": "string"}, "message": {"type": "string"},
+             "reply_to": {"type": "string", "description": "Optional: id of the message you are replying to (shown in its reply hint); keeps the thread together."}},
+            ["to", "message"])),
     ("mesh_read_inbox", "Read unread session-mesh messages for this session.",
      schema({"mark_read": {"type": "boolean", "default": True}})),
 ]
@@ -65,19 +67,23 @@ def t_list(a):
     for r in peers:
         lines.append("%s  %-24s %-14s %s%s%s%s" % (
             r["session_id"][:8], r.get("name"), r.get("host"), r.get("cwd"),
-            "  [via ssh %s]" % r["via"] if r["via"] else "",
+            "  [%s]" % m.via_label(r),
             "  [stale]" if r["stale"] else "",
             "  <- you" if r["session_id"] == me else ""))
     out = "\n".join(lines) or "(no peers)"
     if errs:
         out += "\n\nssh problems:\n" + "\n".join(errs)
+    hint = m.link_hint()
+    if hint:
+        out += "\n\n(%s)" % hint
     return out
 
 
 def t_send(a):
     sid, _ = whoami(a)
     rec = m.read_json(m.peer_path(sid)) or {}
-    return m.send(str(a.get("to", "")), str(a.get("message", "")), sid, rec.get("name") or sid[:8])
+    return m.send(str(a.get("to", "")), str(a.get("message", "")), sid, rec.get("name") or sid[:8],
+                  reply_to=(str(a["reply_to"]) if a.get("reply_to") else None))
 
 
 def t_inbox(a):
@@ -104,7 +110,7 @@ def handle(req):
     if method == "initialize":
         pv = (req.get("params") or {}).get("protocolVersion") or "2024-11-05"
         reply(id_, {"protocolVersion": pv, "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "session-mesh", "version": "0.1.0"}})
+                    "serverInfo": {"name": "session-mesh", "version": "0.2.0"}})
     elif method == "ping":
         reply(id_, {})
     elif method == "tools/list":

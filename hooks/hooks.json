@@ -1,8 +1,70 @@
 {
   "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "timeout": 5, "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" SessionStart" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "timeout": 5, "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" UserPromptSubmit" }] }],
-    "PostToolUse": [{ "hooks": [{ "type": "command", "timeout": 5, "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" PostToolUse" }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "timeout": 5, "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" SessionEnd" }] }]
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" SessionStart"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "asyncRewake": true,
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" Watch"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" PostToolUse"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 5,
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" SessionEnd"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "asyncRewake": true,
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" Watch"
+          }
+        ]
+      }
+    ]
   }
 }

@@ -1,10 +1,156 @@
 #!/usr/bin/env python3
-"""meshctl: list | send <to> <msg> | inbox <sid> [--mark] | gc | hosts add <alias>"""
+"""meshctl: list [--all] | send <to> <msg> | inbox <sid> [--mark] | gc | hosts add <alias>
+  relay [--stop]                 run (foreground) / stop the local unix-socket relay (~/.claude-mesh/relay.sock)
+  ssh <host> [ssh args...]       ssh with the relay reverse-forwarded to <host> (two-way over one connection)
+  ssh-setup --status | --remove | --enable   managed ~/.ssh/config block (automatic at SessionStart)
+  ssh-setup <host> [--apply] [--config PATH]   print (or append) a per-host ~/.ssh/config snippet
+  attach <host>                  add the forward to an ALREADY-OPEN connection (ControlMaster or ~C)
+  pull [--hosts a,b]             one pull-fallback round now (publish peers, collect outbox mail)"""
 import os
+import shlex
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
 import meshlib as m  # noqa: E402
+
+TAKES_VAL = set("bcDEeFIiJLlmOopQRSWw")     # ssh short options that consume an argument
+SAFE_PRE = set("piJlFo46q")                 # pre-host options also given to the mkdir call
+
+
+def split_ssh_args(args):
+    """-> (pre_opts, host, trailing). Options before the host stay options; the rest is the remote command."""
+    pre, i = [], 0
+    while i < len(args):
+        t = args[i]
+        if t.startswith("-") and len(t) > 1:
+            pre.append(t)
+            if len(t) == 2 and t[1] in TAKES_VAL and i + 1 < len(args):
+                pre.append(args[i + 1])
+                i += 1
+            i += 1
+            continue
+        return pre, t, args[i + 1:]
+    raise ValueError("usage: meshctl ssh <host> [ssh args...]")
+
+
+def safe_pre(pre):
+    out, i = [], 0
+    while i < len(pre):
+        t = pre[i]
+        if len(t) == 2 and t[1] in SAFE_PRE:
+            out.append(t)
+            if t[1] in TAKES_VAL and i + 1 < len(pre):
+                out.append(pre[i + 1])
+                i += 1
+        elif t[:2] in ("-p", "-i", "-J", "-l", "-F", "-o") and len(t) > 2:
+            out.append(t)
+        i += 1
+    return out
+
+
+def base_ssh():
+    cfg = os.environ.get("CLAUDE_MESH_SSH_CONFIG")
+    return ["ssh"] + (["-F", os.path.expanduser(cfg)] if cfg else [])
+
+
+def prep_remote(alias, extra, rm_sock=False):
+    _, rsock, lsock = m.remote_forward_spec(alias)
+    if rm_sock:                                   # -O forward cannot unlink a stale socket itself
+        r = subprocess.run(base_ssh() + extra + [alias, "rm -f %s" % shlex.quote(rsock)])
+        if r.returncode != 0:
+            raise ValueError("could not clear %s on %s (ssh rc=%s)" % (rsock, alias, r.returncode))
+    return rsock, lsock
+
+
+def cmd_ssh(a):
+    pre, alias, trail = split_ssh_args(a)
+    m.ensure_dirs()
+    m.relay_ensure()
+    for _ in range(30):
+        if m.relay_alive():
+            break
+        import time
+        time.sleep(0.1)
+    else:
+        raise ValueError("relay did not start; see %s" % m.p("relay.log"))
+    m.add_host(alias)
+    rsock, lsock = prep_remote(alias, safe_pre(pre))   # flat /tmp socket: no remote directory needed
+    argv = base_ssh() + ["-o", "StreamLocalBindUnlink=yes", "-R", "%s:%s" % (rsock, lsock)] + pre + [alias] + trail
+    print("[meshctl] relay forwarded to %s:%s; %s added to hosts" % (alias, rsock, alias), file=sys.stderr)
+    os.execvp(argv[0], argv)
+
+
+SNIPPET = """# session-mesh relay forward (added by meshctl)
+Host {alias}
+    RemoteForward {rsock} {lsock}
+    StreamLocalBindUnlink yes
+"""
+
+
+def cmd_ssh_setup(a):
+    if "--remove" in a:
+        print(m.remove_ssh_config())
+        return
+    if "--enable" in a:
+        print("ssh config:", m.enable_ssh_config())
+        return
+    if "--status" in a:
+        print("\n".join(m.ssh_config_status()))
+        return
+    apply_ = "--apply" in a
+    cfg = None
+    if "--config" in a:
+        cfg = a[a.index("--config") + 1]
+    rest = [x for i, x in enumerate(a) if not x.startswith("--") and not (i and a[i - 1] == "--config")]
+    if not rest:
+        raise ValueError("usage: meshctl ssh-setup <host> [--apply] [--config PATH]")
+    alias = rest[0]
+    _, rsock, lsock = m.remote_forward_spec(alias)
+    snip = SNIPPET.format(alias=alias, rsock=rsock, lsock=lsock)
+    print(snip)
+    print("# Keep the relay running: `meshctl relay` (the SessionStart hook starts it automatically).")
+    if not apply_:
+        print("# Re-run with --apply to append this to ~/.ssh/config.")
+        return
+    path = os.path.expanduser(cfg or "~/.ssh/config")
+    cur = open(path).read() if os.path.exists(path) else ""
+    if rsock in cur:
+        print("# already present in %s; nothing appended" % path)
+    else:
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        with open(path, "a") as f:
+            f.write(("\n" if cur and not cur.endswith("\n") else "") + "\n" + snip)
+        os.chmod(path, 0o600)
+        print("# appended to %s" % path)
+    m.add_host(alias)
+
+
+def cmd_attach(a):
+    if not a:
+        raise ValueError("usage: meshctl attach <host>")
+    alias = a[0]
+    m.ensure_dirs()
+    m.relay_ensure()
+    m.add_host(alias)
+    _, rsock, lsock = m.remote_forward_spec(alias)
+    chk = subprocess.run(base_ssh() + ["-O", "check", alias], capture_output=True, text=True)
+    if chk.returncode == 0:
+        rsock, lsock = prep_remote(alias, [], rm_sock=True)      # runs through the existing master
+        r = subprocess.run(base_ssh() + ["-O", "forward", "-R", "%s:%s" % (rsock, lsock), alias])
+        if r.returncode != 0:
+            raise ValueError("ssh -O forward failed (rc=%s)" % r.returncode)
+        print("attached: %s:%s -> %s (live, no reconnect)" % (alias, rsock, lsock))
+        return
+    print("No ControlMaster socket found for %s (ssh -O check: %s)." % (alias, chk.stderr.strip() or "failed"))
+    print("In your already-open ssh session, first run on the REMOTE host:")
+    print("    rm -f %s" % rsock)
+    print("Then press Enter, type  ~C  (tilde, capital C) to get the `ssh>` prompt, and enter:")
+    print("    -R %s:%s" % (rsock, lsock))
+    print("Note: OpenSSH >= 9.2 disables the ~C command line unless the client has `EnableEscapeCommandline yes`")
+    print("(ssh -o EnableEscapeCommandline=yes ..., or in ~/.ssh/config). Without it, use `meshctl ssh %s` next time" % alias)
+    print("or add `ControlMaster auto` / `ControlPath` to your ssh config so `meshctl attach` works live.")
+    print("The remote sshd must allow it (AllowStreamLocalForwarding yes, the default).")
 
 
 def main(a):
@@ -15,8 +161,8 @@ def main(a):
     if c == "list":
         peers, errs = m.all_peers(include_stale="--all" in a)
         for r in peers:
-            print("%s  %-24s %-14s %s%s%s" % (r["session_id"], r.get("name"), r.get("host"), r.get("cwd"),
-                  "  [via ssh %s]" % r["via"] if r["via"] else "", "  [stale]" if r["stale"] else ""))
+            print("%s  %-24s %-14s %s  [%s]%s" % (r["session_id"], r.get("name"), r.get("host"), r.get("cwd"),
+                  m.via_label(r), "  [stale]" if r["stale"] else ""))
         if not peers:
             print("(no peers)")
         for e in errs:
@@ -30,6 +176,25 @@ def main(a):
         print(m.gc())
     elif c == "hosts" and len(a) >= 3 and a[1] == "add":
         print("hosts:", ", ".join(m.add_host(a[2])))
+    elif c == "relay":
+        if "--stop" in a:
+            print(m.relay_stop())
+            return 0
+        return m.relay_serve()
+    elif c == "ssh":
+        cmd_ssh(a[1:])
+    elif c == "ssh-setup":
+        cmd_ssh_setup(a[1:])
+    elif c == "attach":
+        cmd_attach(a[1:])
+    elif c == "pull":
+        hs = a[a.index("--hosts") + 1].split(",") if "--hosts" in a else None
+        for h in (hs if hs is not None else m.hosts_list()):
+            res = m.auto_attach(h)
+            if res == "attached":
+                print("%s: relay forward attached to the open connection" % h)
+        for h, n, err in m.pull_all(hs):
+            print("%s: delivered %d%s" % (h, n, "  ERROR " + err if err else ""))
     else:
         print(__doc__)
         return 2
