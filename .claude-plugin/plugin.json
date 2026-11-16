@@ -1,0 +1,8 @@
+{
+  "name": "session-mesh",
+  "version": "0.1.0",
+  "description": "Let your own Claude Code sessions (same machine, other nodes, SSH hosts) list each other and exchange short messages.",
+  "author": { "name": "Ryan Kim" },
+  "license": "MIT",
+  "keywords": ["mesh", "messaging", "multi-session"]
+}

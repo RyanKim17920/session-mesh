@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "timeout": 5, "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" SessionStart" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "timeout": 5, "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" UserPromptSubmit" }] }],
+    "PostToolUse": [{ "hooks": [{ "type": "command", "timeout": 5, "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" PostToolUse" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "timeout": 5, "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mesh_hook.py\" SessionEnd" }] }]
+  }
+}

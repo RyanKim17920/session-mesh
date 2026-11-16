@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""meshctl: list | send <to> <msg> | inbox <sid> [--mark] | gc | hosts add <alias>"""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+import meshlib as m  # noqa: E402
+
+
+def main(a):
+    if not a or a[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    c = a[0]
+    if c == "list":
+        peers, errs = m.all_peers(include_stale="--all" in a)
+        for r in peers:
+            print("%s  %-24s %-14s %s%s%s" % (r["session_id"], r.get("name"), r.get("host"), r.get("cwd"),
+                  "  [via ssh %s]" % r["via"] if r["via"] else "", "  [stale]" if r["stale"] else ""))
+        if not peers:
+            print("(no peers)")
+        for e in errs:
+            print("ssh problem:", e, file=sys.stderr)
+    elif c == "send" and len(a) >= 3:
+        print(m.send(a[1], " ".join(a[2:]), "meshctl-" + (os.environ.get("USER") or "user"), "meshctl"))
+    elif c == "inbox" and len(a) >= 2:
+        msgs, _ = m.take_inbox(m.safe_id(a[1]), mark_read="--mark" in a)
+        print("\n\n".join(msgs) if msgs else "(inbox empty)")
+    elif c == "gc":
+        print(m.gc())
+    elif c == "hosts" and len(a) >= 3 and a[1] == "add":
+        print("hosts:", ", ".join(m.add_host(a[2])))
+    else:
+        print(__doc__)
+        return 2
+    return 0
+
+
+try:
+    sys.exit(main(sys.argv[1:]))
+except ValueError as e:
+    print("error:", e, file=sys.stderr)
+    sys.exit(1)

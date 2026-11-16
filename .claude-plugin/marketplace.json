@@ -1,0 +1,12 @@
+{
+  "name": "session-mesh",
+  "owner": { "name": "Ryan Kim" },
+  "description": "Local marketplace for the session-mesh plugin.",
+  "plugins": [
+    {
+      "name": "session-mesh",
+      "source": "./",
+      "description": "Cross-session messaging for your own Claude Code sessions."
+    }
+  ]
+}
